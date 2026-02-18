@@ -67,6 +67,19 @@ function typeDefToExtTypes (api: ApiPromise, typeDef: TypeDef, identifier: strin
   return { [fieldName]: encoded };
 }
 
+// Stores the resolved user extensions for propagation to the PJS extension
+// via metadata.provide(). Set by registerDynamicExtensions, read by useChainInfo.
+let resolvedUserExtensions: ExtDef = {};
+
+/**
+ * Returns the resolved user extensions (both dynamic and static) for the
+ * current chain. Used by useChainInfo to include in MetadataDef when
+ * injecting metadata into the PJS extension.
+ */
+export function getResolvedUserExtensions (): ExtDef {
+  return resolvedUserExtensions;
+}
+
 /**
  * Dynamically resolve unknown signed extensions from metadata and register
  * them with the API registry. Existing built-in and static (apps-config)
@@ -74,15 +87,19 @@ function typeDefToExtTypes (api: ApiPromise, typeDef: TypeDef, identifier: strin
  * covered by those sources.
  */
 export function registerDynamicExtensions (api: ApiPromise): void {
+  const specName = api.runtimeVersion.specName.toString();
+  const staticExtensions: ExtDef = typesBundle?.spec?.[specName]?.signedExtensions ?? {};
+
   const metadata = api.registry.metadata;
 
   if (!metadata?.extrinsic?.transactionExtensions) {
+    // No metadata-based extensions, but still capture static ones
+    resolvedUserExtensions = staticExtensions;
+
     return;
   }
 
   const extensions = metadata.extrinsic.transactionExtensions;
-  const specName = api.runtimeVersion.specName.toString();
-  const staticExtensions: ExtDef = typesBundle?.spec?.[specName]?.signedExtensions ?? {};
 
   const dynamicExtensions: ExtDef = {};
   let dynamicCount = 0;
@@ -111,6 +128,9 @@ export function registerDynamicExtensions (api: ApiPromise): void {
       console.warn(`Dynamic extension resolution: failed to resolve "${identifier}"`, error);
     }
   }
+
+  // Always store the merged result for metadata injection to extensions
+  resolvedUserExtensions = { ...dynamicExtensions, ...staticExtensions };
 
   if (dynamicCount > 0) {
     console.log(`Dynamically resolved ${dynamicCount} signed extension(s): ${Object.keys(dynamicExtensions).join(', ')}`);
